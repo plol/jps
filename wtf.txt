@@ -1,0 +1,72 @@
+
+
+        if (primaryJump) {
+            if (dy != 0) {
+                Position p1 = jump(p, -1, 0, false);
+                if (valid(p1)) return p;
+                Position p2 = jump(p, 1, 0, false);
+                if (valid(p2)) return p;
+            } else {
+                Position p1 = jump(p, 0, -1, false);
+                if (valid(p1)) return p;
+                Position p2 = jump(p, 0, 1, false);
+                if (valid(p2)) return p;
+            }
+        } else {
+
+            if (left_clear && !previous_left_clear) {
+                return p;
+            }
+            if (right_clear && !previous_right_clear) {
+                return p;
+            }
+        }
+        previous_left_clear = left_clear;
+        previous_right_clear = right_clear;
+        p = forwardOf(p);
+    }
+    return invalidPosition();
+}
+
+}
+
+
+int FindPath( const int nStartX, const int nStartY,
+        const int nTargetX, const int nTargetY,
+        const unsigned char* pMap, const int nMapWidth, const int nMapHeight,
+        int* pOutBuffer, const int nOutBufferSize ) {
+
+    return JumpPointSearch(
+            nStartX, nStartY,
+            nTargetX, nTargetY,
+            pMap, nMapWidth, nMapHeight,
+            pOutBuffer, nOutBufferSize
+        ).findPath();
+}
+
+
+
+
+void makeBMP(int, int);
+
+
+int main() {
+
+    const int nMapWidth = 13, nMapHeight = 12;
+
+    unsigned char pMap[] = {
+        1,1,1,1,1, 1,1,1,1,1, 1,1,1,
+        1,1,1,1,1, 1,1,1,1,1, 1,0,1,
+        1,1,1,1,1, 1,1,1,1,1, 1,1,1,
+        1,1,1,1,1, 0,1,0,1,1, 1,1,1,
+        1,1,1,1,1, 0,1,0,0,0, 0,1,1,
+
+        1,1,1,1,1, 0,1,0,1,1, 0,1,1,
+        1,1,1,1,1, 0,1,0,1,1, 1,1,1,
+        1,1,1,1,1, 0,1,0,1,1, 0,1,1,
+        1,1,1,1,1, 0,1,0,0,0, 0,1,1,
+        1,1,1,1,1, 0,1,1,1,1, 1,1,1,
+        
+        1,1,1,1,1, 0,1,1,1,1, 1,1,1,
+        1,1,1,1,1, 0,1,1,1,1, 1,1,1
+    };

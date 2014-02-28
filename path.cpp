@@ -4,6 +4,9 @@
 #include <map>
 #include <set>
 #include <algorithm>
+#include <queue>
+#include <vector>
+#include <functional>
 
 #include <string.h>
 
@@ -37,14 +40,26 @@ Position eastOf(const Position p) { return Position(p.x + 1, p.y); }
 Position invalidPosition() { return Position(-1, -1); }
 
 struct NodeData {
-    int actualCost;
-    int estimatedCost;
+    int cost;
     Position cameFrom;
 
-    NodeData(int actualCost, int heuristicCost, Position cameFrom)
-            : actualCost(actualCost), estimatedCost(actualCost + heuristicCost),
-              cameFrom(cameFrom) { }
-    NodeData() : actualCost(0), estimatedCost(0), cameFrom(0,0) {}
+    NodeData(int cost, Position cameFrom)
+            : cost(cost), cameFrom(cameFrom) { }
+    NodeData() : cost(0), cameFrom(0,0) {}
+};
+
+struct OpenSetData {
+    int cost;
+    Position pos;
+
+    OpenSetData(int cost, Position pos) : cost(cost), pos(pos) { }
+
+    bool operator>(const OpenSetData other) const {
+        if (cost == other.cost) {
+            return pos < other.pos;
+        }
+        return cost > other.cost;
+    }
 };
 
 
@@ -61,7 +76,7 @@ class JumpPointSearch {
     int* pOutBuffer;
     const int nOutBufferSize;
 
-    std::set<Position> open_set;
+    std::priority_queue<OpenSetData, std::vector<OpenSetData>, std::greater<OpenSetData>> open_set;
     std::set<Position> closed_set;
 
     std::map<Position, NodeData> nodeData;
@@ -71,10 +86,6 @@ class JumpPointSearch {
 
     int getIndex( const Position pos ) {
         return pos.y * nMapWidth + pos.x;
-    }
-
-    int heuristicCostEstimate( const Position pos1 ) {
-        return abs(pos1.x - target.x) + abs(pos1.y - target.y);
     }
 
     bool withinBounds(const Position pos) {
@@ -95,17 +106,17 @@ class JumpPointSearch {
     Position jump(const Position from, const int dx, const int dy);
 
 
-    void addNodeData(Position p, int actualCost, Position cameFrom) {
+    void addNodeData(Position p, int cost, Position cameFrom) {
         auto iterator = nodeData.find(p);
 
         if (iterator == nodeData.end()) {
-            nodeData[p] = NodeData(actualCost, heuristicCostEstimate(p), cameFrom);
+            nodeData[p] = NodeData(cost, cameFrom);
         } else {
-            if (iterator->second.actualCost > actualCost) {
+            if (iterator->second.cost > cost) {
                 //printf("%d %d\n", iterator->first.x, iterator->first.y);
-                printf("Found alternate path to node which was shorter :( %d vs %d\n", iterator->second.actualCost, actualCost);
+                printf("Found alternate path to node which was shorter :( %d vs %d\n", iterator->second.cost, cost);
                 //throw 4;
-                nodeData[p] = NodeData(actualCost, heuristicCostEstimate(p), cameFrom);
+                //nodeData[p] = NodeData(cost, cameFrom);
             }
         }
     }
@@ -115,13 +126,13 @@ class JumpPointSearch {
             return;
         }
 
-        int actualCost = nodeData[cameFrom].actualCost;
-        actualCost += abs(p.x-cameFrom.x) + abs(p.y - cameFrom.y);
+        int cost = nodeData[cameFrom].cost;
+        cost += abs(p.x-cameFrom.x) + abs(p.y - cameFrom.y);
 
-        addNodeData(p, actualCost, cameFrom);
+        addNodeData(p, cost, cameFrom);
 
         if (closed_set.find(p) == closed_set.end()) {
-            open_set.insert(p);
+            open_set.push(OpenSetData(cost, p));
         }
     }
 public:
@@ -159,8 +170,6 @@ public:
                     printf("s");
                 } else if (p == target) {
                     printf("t");
-                } else if (open_set.find(p) != open_set.end()) {
-                    printf("x");
                 } else if (nodeData.find(p) != nodeData.end()) {
                     printf(".");
                 } else if (valid(p)) {
@@ -186,7 +195,7 @@ public:
 int JumpPointSearch::findPath() {
     closed_set.insert(start);
 
-    nodeData[start] = NodeData(0, heuristicCostEstimate(start), start);
+    nodeData[start] = NodeData(0, start);
 
     addToProcessing(jump(start, 1, 0), start);
     addToProcessing(jump(start, 0, -1), start);
@@ -196,26 +205,11 @@ int JumpPointSearch::findPath() {
     while (!open_set.empty()) {
         //printf("======================================================\n");
         //printState();
-        auto current = *open_set.begin();
-        int estcost = nodeData[current].estimatedCost;
-        int actcost = nodeData[current].actualCost;
-        for (Position p : open_set) {
-            if (nodeData[p].actualCost < actcost) { 
-            //if (nodeData[p].estimatedCost < estcost
-            //        ||
-            //        (nodeData[p].estimatedCost == estcost
-            //         && nodeData[p].actualCost > actcost
-            //        )) {
-                current = p;
-                estcost = nodeData[p].estimatedCost;
-                actcost = nodeData[p].actualCost;
-            }
-        }
-
+        auto current = open_set.top().pos;
 
         if (current == target) {
             // do stuff
-            int cost = nodeData[target].actualCost;
+            int cost = nodeData[target].cost;
             int i = cost;
             while (!(current == start)) {
                 Position walker = current;
@@ -237,7 +231,7 @@ int JumpPointSearch::findPath() {
             return cost;
         }
 
-        open_set.erase(current);
+        open_set.pop();
         closed_set.insert(current);
 
         Position cameFrom = nodeData[current].cameFrom;
@@ -304,8 +298,8 @@ Position JumpPointSearch::jump(const Position from, const int dx, const int dy) 
     bool previous_right_clear = valid(rightOf(from));
 
     Position p(forwardOf(from));
-    //printf("ActualCost: %d\n", actualCost);
-    //debugArray[getIndex(from)] = actualCost;
+    //printf("ActualCost: %d\n", cost);
+    //debugArray[getIndex(from)] = cost;
 
     while (valid(p)) {
 

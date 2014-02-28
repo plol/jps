@@ -103,7 +103,7 @@ class JumpPointSearch {
         } else {
             if (iterator->second.actualCost > actualCost) {
                 //printf("%d %d\n", iterator->first.x, iterator->first.y);
-                printf("Found alternate path to node which was shorter :( %d vs %d\n", iterator->second.actualCost, actualCost);
+                //printf("Found alternate path to node which was shorter :( %d vs %d\n", iterator->second.actualCost, actualCost);
                 //throw 4;
                 nodeData[p] = NodeData(actualCost, heuristicCostEstimate(p), cameFrom);
             }
@@ -200,12 +200,12 @@ int JumpPointSearch::findPath() {
         int estcost = nodeData[current].estimatedCost;
         int actcost = nodeData[current].actualCost;
         for (Position p : open_set) {
-            if (nodeData[p].actualCost < actcost) { 
-            //if (nodeData[p].estimatedCost < estcost
-            //        ||
-            //        (nodeData[p].estimatedCost == estcost
-            //         && nodeData[p].actualCost > actcost
-            //        )) {
+            //if (nodeData[p].actualCost < actcost) { 
+            if (nodeData[p].estimatedCost < estcost
+                    ||
+                    (nodeData[p].estimatedCost == estcost
+                     && nodeData[p].actualCost < actcost
+                    )) {
                 current = p;
                 estcost = nodeData[p].estimatedCost;
                 actcost = nodeData[p].actualCost;
@@ -268,30 +268,24 @@ unsigned int* debugArray;
 
 Position JumpPointSearch::jump(const Position from, const int dx, const int dy) {
 
+    //printf("jumping %d %d  +  %d %d\n", from.x, from.y, dx, dy);
+
+
     std::function<Position (const Position)> leftOf, rightOf, forwardOf;
 
-    //printf("%d %d ", from.x, from.y);
     if (dx == 1) {
-        //printf("jump to east\n");
-
         leftOf = &northOf;
         rightOf = &southOf;
         forwardOf = &eastOf;
     } else if (dx == -1) {
-        //printf("jump to west\n");
-
         leftOf = &southOf;
         rightOf = &northOf;
         forwardOf = &westOf;
     } else if (dy == 1) {
-        //printf("jump to south\n");
-
         leftOf = &eastOf;
         rightOf = &westOf;
         forwardOf = &southOf;
     } else if (dy == -1) {
-        //printf("jump to north\n");
-
         leftOf = &westOf;
         rightOf = &eastOf;
         forwardOf = &northOf;
@@ -304,8 +298,9 @@ Position JumpPointSearch::jump(const Position from, const int dx, const int dy) 
     bool previous_right_clear = valid(rightOf(from));
 
     Position p(forwardOf(from));
-    //printf("ActualCost: %d\n", actualCost);
-    //debugArray[getIndex(from)] = actualCost;
+
+    bool left_clear = valid(leftOf(p));
+    bool right_clear = valid(rightOf(p));
 
     while (valid(p)) {
 
@@ -313,24 +308,31 @@ Position JumpPointSearch::jump(const Position from, const int dx, const int dy) 
             return p;
         }
 
-        bool left_clear = valid(leftOf(p));
-        bool right_clear = valid(rightOf(p));
+        bool next_left_clear = valid(leftOf(forwardOf(p)));
+        bool next_right_clear = valid(rightOf(forwardOf(p)));
 
         if (dy != 0) {
             Position p1 = jump(p, -1, 0);
-            if (valid(p1)) return p;
-            Position p2 = jump(p, 1, 0);
-            if (valid(p2)) return p;
-        } else {
-            if (left_clear && !previous_left_clear) {
+            if (valid(p1)) {
                 return p;
             }
-            if (right_clear && !previous_right_clear) {
+            Position p2 = jump(p, 1, 0);
+            if (valid(p2)) {
+                return p;
+            }
+        } else {
+            if (left_clear && !(previous_left_clear && (next_left_clear || !withinBounds(leftOf(forwardOf(p)))))) {
+                return p;
+            }
+            if (right_clear && !(previous_right_clear && next_right_clear || !withinBounds(rightOf(forwardOf(p))))) {
                 return p;
             }
         }
         previous_left_clear = left_clear;
         previous_right_clear = right_clear;
+        left_clear = next_left_clear;
+        right_clear = next_right_clear;
+
         p = forwardOf(p);
     }
     return invalidPosition();
@@ -360,21 +362,28 @@ void makeBMP(int, int);
 
 int main() {
 
-    //const int nMapWidth = 5, nMapHeight = 5;
+    //const int nMapWidth = 13, nMapHeight = 12;
 
     //unsigned char pMap[] = {
-    //    1,1,1,1,1,
-    //    1,0,1,0,1,
-    //    1,1,1,1,1,
-    //    1,0,0,0,0,
-    //    1,1,1,1,1
+    //    1,1,1,1,1, 1,1,1,1,1, 1,1,1,
+    //    1,1,1,1,1, 1,1,0,0,0, 0,0,1,
+    //    1,1,1,1,1, 1,1,1,1,1, 1,1,1,
+    //    1,1,1,1,1, 0,1,0,1,1, 1,1,1,
+    //    1,1,1,1,1, 0,1,0,0,0, 0,1,1,
+
+    //    1,1,1,1,1, 0,1,0,1,1, 0,1,1,
+    //    1,1,1,1,1, 0,1,0,1,1, 1,1,1,
+    //    1,1,1,1,1, 0,1,0,1,1, 0,1,1,
+    //    1,1,1,1,1, 0,1,0,0,0, 0,0,0,
+    //    1,1,1,1,1, 0,1,1,1,1, 1,1,1,
+    //    
+    //    1,1,1,1,1, 0,1,1,1,1, 1,1,1,
+    //    1,1,1,1,1, 0,1,1,1,1, 1,1,1
     //};
-    //
     
 
     const int nMapWidth = 1024, nMapHeight = 1024;
 
-    debugArray = new unsigned int[nMapWidth * nMapHeight];
 
     unsigned char* pMap = new unsigned char[nMapWidth * nMapHeight];
 
@@ -393,6 +402,8 @@ int main() {
     }
 
     pMap[0] = 1;
+
+    debugArray = new unsigned int[nMapWidth * nMapHeight];
 
     for (int i = 0; i < nMapWidth*nMapHeight; i += 1) {
         if (pMap[i] == 0) {
