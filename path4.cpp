@@ -1,13 +1,7 @@
 
-
-#include <stdio.h>
 #include <map>
 #include <set>
 #include <algorithm>
-
-#include <string.h>
-
-#include <chrono>
 
 namespace { // wrap everything but FindPath in anonymous namespace
 
@@ -372,73 +366,4 @@ int FindPath( const int nStartX, const int nStartY,
             pOutBuffer, nOutBufferSize
         ).findPath();
 }
-
-
-int main() {
-    //const int nMapWidth = 13, nMapHeight = 13;
-    //
-    //unsigned char pMap[] = {
-    //    1,1,1,1,1, 1,1,1,1,1, 1,1,1,
-    //    1,1,1,1,1, 1,1,0,0,0, 0,0,1,
-    //    1,1,1,1,1, 1,1,1,1,1, 1,1,1,
-    //    1,1,1,1,1, 0,1,0,1,1, 1,1,1,
-    //    1,1,1,1,1, 0,1,0,0,0, 0,1,1,
-    //
-    //    1,1,1,1,1, 0,1,0,1,1, 0,1,1,
-    //    1,1,1,1,1, 0,1,0,1,1, 1,1,1,
-    //    1,1,1,1,1, 0,1,0,1,1, 0,1,1,
-    //    1,1,1,1,1, 0,1,0,0,0, 0,0,0,
-    //    1,1,1,1,1, 0,1,1,1,1, 1,1,1,
-    //    
-    //    1,1,1,1,1, 0,1,1,1,1, 1,1,1,
-    //    1,1,1,1,1, 0,0,0,0,1, 1,1,1,
-    //    1,1,1,1,1, 0,1,1,1,1, 1,1,1
-    //};
-    
-
-    const int nMapWidth = 1024, nMapHeight = 1024;
-    
-    
-    unsigned char* pMap = new unsigned char[nMapWidth * nMapHeight];
-    
-    for (int i = 0; i < nMapWidth * nMapHeight; i++) {
-   //     pMap[i] = 1;
-   // }
-        pMap[i] = i % 6 != 0;
-        if (i % 7 == 0) {
-            pMap[i] = 0;
-        }
-    }
-    for (int x = 0; x < nMapWidth; x++) {
-        for (int y = 0; y < nMapHeight; y++) {
-            if (x % 10 == 0 && y % 2 == 0) {
-                pMap[x + y * nMapWidth] = 0;
-            }
-        }
-    }
-    
-    pMap[0] = 1;
-
-    int* outputBuffer = new int[1024*1024];
-
-    auto before = std::chrono::steady_clock::now();
-    
-    int pathLength = FindPath(0, 0, nMapWidth-1, nMapHeight-1, pMap, nMapWidth, nMapHeight, outputBuffer, 2483);
-
-    auto after = std::chrono::steady_clock::now();
-
-    printf("Took %d milliseconds\n", std::chrono::duration_cast<std::chrono::milliseconds>(after - before).count());
-
-    printf("i = %d\n", pathLength);
-
-    for (int i = 0; i < pathLength; i += 1) {
-        //printf("%d\n", outputBuffer[i]);
-        if (pMap[outputBuffer[i]] == 0) {
-            printf("%d\n", i);
-        }
-    }
-}
-
-
-
 
