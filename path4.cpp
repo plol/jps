@@ -7,7 +7,9 @@
 
 #include <string.h>
 
-namespace {
+#include <chrono>
+
+namespace { // wrap everything but FindPath in anonymous namespace
 
 int sgn(int val) {
     return (val > 0) - (val < 0);
@@ -22,6 +24,9 @@ struct Position {
 
     bool operator==(const Position other) const {
         return x == other.x && y == other.y;
+    }
+    bool operator!=(const Position other) const {
+        return !(*this == other);
     }
     bool operator<(const Position other) const {
         if (x == other.x) { return y < other.y; }
@@ -41,10 +46,10 @@ Position invalidPosition() { return Position(-1, -1); }
 
 struct NodeData {
     int actualCost;
-    int estimatedCost;
+    float estimatedCost;
     Position cameFrom;
 
-    NodeData(int actualCost, int heuristicCost, Position cameFrom)
+    NodeData(int actualCost, float heuristicCost, Position cameFrom)
             : actualCost(actualCost), estimatedCost(actualCost + heuristicCost),
               cameFrom(cameFrom) { }
     NodeData() : actualCost(0), estimatedCost(0), cameFrom(0,0) {}
@@ -55,7 +60,8 @@ struct NodeData {
  * Class wrapper for implementation of Jump Point Search.
  *
  * Wrapped in a class to reduce passing around of variables such as map width.
- *
+ * 
+ * Used by the function FindPath.
  */
 class JumpPointSearch {
     const unsigned char* pMap;
@@ -64,13 +70,13 @@ class JumpPointSearch {
     int* pOutBuffer;
     const int nOutBufferSize;
 
-    std::map<Position, NodeData> open_set;
-    std::map<Position, NodeData> closed_set;
+    std::map<Position, NodeData> openSet;
+    std::map<Position, NodeData> closedSet;
 
     Position start;
     Position target;
 
-    int getIndex( const Position pos ) {
+    int getIndex(const Position pos) {
         return pos.y * nMapWidth + pos.x;
     }
     int distance(const Position pos1, const Position pos2) {
@@ -81,7 +87,7 @@ class JumpPointSearch {
         // chebyshev for the heuristic
         int dx = abs(pos1.x - target.x);
         int dy = abs(pos1.y - target.y);
-        return sqrt(2) * std::min(dx, dy) + std::max(dx,dy) - std::min(dx,dy);
+        return sqrt(2.0f) * std::min(dx, dy) + std::max(dx,dy) - std::min(dx,dy);
     }
     bool withinBounds(const Position pos) {
         return 0 <= pos.x && pos.x < nMapWidth
@@ -90,11 +96,17 @@ class JumpPointSearch {
     bool valid(const Position pos) {
         return withinBounds(pos) && pMap[getIndex(pos)] == 1;
     }
+    
+    /**
+     * Reconstructs path from currentPos (which is going to be == target)
+     * Returns length of said path.
+     */
+    int JumpPointSearch::reconstructPath(Position currentPos, NodeData currentNodeData);
 
     /**
      * Traverses the grid in specified direction.
      *
-     * Returns a position which needs to be added to the open set,
+     * Returns a position which needs to be visited,
      * or invalidPosition() if no such node was found.
      */
     Position jump(const Position from, const int dx, const int dy);
@@ -114,12 +126,16 @@ class JumpPointSearch {
     int getNeighbors(const Position pos, Position outNeighbors[8], const Position cameFrom);
 
     /**
-     * gets forced neighbors for position travelling in incomingX, incomingY
-     * assumes 2 spots free in outNeighbors
+     * Gets forced neighbors for position travelling in dx, dy.
+     * Assumes 2 spots free in outNeighbors.
+     * Returns number of forced neighbors found.
      */
-    int getForcedNeighbors(const Position pos, Position outNeighbors[2], int incomingX, int incomingY);
+    int getForcedNeighbors(const Position pos, Position outNeighbors[2], int dx, int dy);
 
 public:
+    /**
+     * Constructs the wrapper with the arguments for the path finding.
+     */
     JumpPointSearch( const int nStartX, const int nStartY,
             const int nTargetX, const int nTargetY,
             const unsigned char* pMap, const int nMapWidth, const int nMapHeight,
@@ -129,139 +145,88 @@ public:
           pOutBuffer(pOutBuffer), nOutBufferSize(nOutBufferSize) {}
 
     /**
-     * Entry point function
+     * Entry point function.
+     * Returns length of path found. Path written to pOutBuffer.
      */
     int findPath();
-
-
-    void printState() {
-        printf("+");
-        for (int x = 0; x < nMapWidth; x += 1) {
-            printf("-");
-        }
-        printf("+\n");
-        for (int y = 0; y < nMapHeight; y += 1) {
-            printf("|");
-            for (int x = 0; x < nMapWidth; x += 1) {
-
-
-                Position p(x,y);
-
-                if (p == start) {
-                    printf("s");
-                } else if (p == target) {
-                    printf("t");
-                } else if (open_set.find(p) != open_set.end()) {
-                    printf("x");
-                } else if (closed_set.find(p) != closed_set.end()) {
-                    printf(".");
-                } else if (valid(p)) {
-                    printf(" ");
-                } else {
-                    printf("#");
-                }
-
-
-            }
-            printf("|\n");
-        }
-        printf("+");
-        for (int x = 0; x < nMapWidth; x += 1) {
-            printf("-");
-        }
-        printf("+\n");
-    }
 };
 
-int JumpPointSearch::findPath() {
-    open_set[start] = NodeData(0, heuristicCostEstimate(start), invalidPosition());
+int JumpPointSearch::reconstructPath(Position currentPos, NodeData currentNodeData) {
+    int cost = currentNodeData.actualCost;
 
-    while (!open_set.empty()) {
-        //printf("======================================================\n");
-        //printState();
-        auto current = open_set.begin();
+    int i = cost;
+    Position cameFrom = currentNodeData.cameFrom;
+    while (currentPos != start) {
+        Position walker = currentPos;
+        int dx = -sgn(currentPos.x - cameFrom.x);
+        int dy = -sgn(currentPos.y - cameFrom.y);
+
+        while (walker != cameFrom) {
+            pOutBuffer[--i] = getIndex(walker);
+
+            if (dx != 0 && dy != 0) { // let's not walk through a wall
+                if (valid(movedBy(walker, dx, 0))) {
+                    walker = movedBy(walker, dx, 0);
+                    pOutBuffer[--i] = getIndex(walker); // another write here
+                    walker = movedBy(walker, 0, dy);
+                }
+                else {
+                    walker = movedBy(walker, 0, dy);
+                    pOutBuffer[--i] = getIndex(walker); // or here
+                    walker = movedBy(walker, dx, 0);
+                }
+            }
+            else {
+                walker = movedBy(walker, dx, dy);
+            }
+        }
+        currentPos = cameFrom;
+        cameFrom = closedSet[cameFrom].cameFrom;
+    }
+    return cost;
+}
+
+int JumpPointSearch::findPath() {
+    openSet[start] = NodeData(0, heuristicCostEstimate(start), invalidPosition());
+
+    while (!openSet.empty()) {
+        auto current = openSet.begin();
         auto pair = current;
-        for (++pair; pair != open_set.end(); ++pair) {
-            //printf("%d %d (%d) vs %d %d (%d) ",
-            //        current->first.x, current->first.y, current->second.estimatedCost,
-            //        pair->first.x, pair->first.y, pair->second.estimatedCost
-            //      );
+        for (++pair; pair != openSet.end(); ++pair) {
             if (pair->second.estimatedCost < current->second.estimatedCost) {
-                //printf("re-placin!\n");
                 current = pair;
             }
-            //printf("\n");
         }
-
         Position currentPos = current->first;
         NodeData currentNodeData = current->second;
 
         if (currentPos == target) {
-            // do stuff
-            int cost = currentNodeData.actualCost;
-            int i = cost;
-            Position cameFrom = currentNodeData.cameFrom;
-            while (!(currentPos == start)) {
-                Position walker = currentPos;
- 
-                int dx = -sgn(currentPos.x - cameFrom.x);
-                int dy = -sgn(currentPos.y - cameFrom.y);
-
-                while (!(walker == cameFrom)) {
-                    pOutBuffer[--i] = getIndex(walker);
-
-                    if (dx != 0 && dy != 0) { // let's not walk through a wall
-                        if (valid(movedBy(walker, dx, 0))) {
-                            walker = movedBy(walker, dx, 0);
-                            pOutBuffer[--i] = getIndex(walker); // another write here
-                            walker = movedBy(walker, 0, dy);
-                        } else {
-                            walker = movedBy(walker, 0, dy);
-                            pOutBuffer[--i] = getIndex(walker); // or here
-                            walker = movedBy(walker, dx, 0);
-                        }
-                    } else {
-                        walker = movedBy(walker, dx, dy);
-                    }
-                }
-
-                currentPos = cameFrom;
-                cameFrom = closed_set[cameFrom].cameFrom;
-            }
-
-            return cost;
+            return reconstructPath(currentPos, currentNodeData);
         }
-
-        open_set.erase(currentPos);
-        closed_set[currentPos] = currentNodeData;
+        openSet.erase(currentPos);
+        closedSet[currentPos] = currentNodeData;
 
         Position successors[8];
+        int numSuccessors = getSuccessors(currentPos, successors, currentNodeData.cameFrom);
 
-        int num_successors = getSuccessors(currentPos, successors, currentNodeData.cameFrom);
-
-        for (int i = 0; i < num_successors; i += 1) {
-
+        for (int i = 0; i < numSuccessors; i += 1) {
             Position successor = successors[i];
 
-            //printf("successor: %d %d\n", successor.x, successor.y);
-
-            if (closed_set.find(successor) != closed_set.end()) {
+            if (closedSet.find(successor) != closedSet.end()) {
                 continue;
             }
-
-
             int cost = currentNodeData.actualCost + distance(currentPos, successor);
 
-            //printf("cost = %d\n", cost);
-
+            if (cost > nOutBufferSize) { // dont bother adding nodes that are unreachable
+                continue;
+            }
             float heuristic = heuristicCostEstimate(successor);
 
-            if (open_set.find(successor) == open_set.end()
-                    || cost + heuristic < open_set[successor].estimatedCost) {
-                open_set[successor] = NodeData(cost, heuristic, currentPos);
+            if (openSet.find(successor) == openSet.end()
+                    || cost + heuristic < openSet[successor].estimatedCost) {
+                openSet[successor] = NodeData(cost, heuristic, currentPos);
             }
         }
-
     }
     return -1;
 }
@@ -270,7 +235,7 @@ int JumpPointSearch::getSuccessors(const Position pos, Position outSuccessors[8]
     Position neighbors[8];
     getNeighbors(pos, neighbors, cameFrom);
 
-    int successors_found = 0;
+    int successorsFound = 0;
 
     for (int i = 0; i < 8; i += 1) {
         Position neighbor = neighbors[i];
@@ -281,11 +246,11 @@ int JumpPointSearch::getSuccessors(const Position pos, Position outSuccessors[8]
 
         Position result = jump(pos, dx, dy);
         if (valid(result)) {
-            outSuccessors[successors_found] = result;
-            successors_found += 1;
+            outSuccessors[successorsFound] = result;
+            successorsFound += 1;
         }
     }
-    return successors_found;
+    return successorsFound;
 }
 
 int JumpPointSearch::getNeighbors(const Position pos, Position outNeighbors[8], const Position cameFrom) {
@@ -301,72 +266,68 @@ int JumpPointSearch::getNeighbors(const Position pos, Position outNeighbors[8], 
         return 8;
     }
 
-    int incomingX = sgn(pos.x - cameFrom.x);
-    int incomingY = sgn(pos.y - cameFrom.y);
+    int dx = sgn(pos.x - cameFrom.x);
+    int dy = sgn(pos.y - cameFrom.y);
 
-    int num_neighbors = 0;
+    int numNeighbors = 0;
 
-    if (incomingX != 0 && incomingY == 0) { // moving on x only
-        outNeighbors[num_neighbors++] = movedBy(pos, incomingX, 0);
-    } else if (incomingX == 0 && incomingY != 0) { // moving on y only
-        outNeighbors[num_neighbors++] = movedBy(pos, 0, incomingY);
+    if (dx != 0 && dy == 0) { // moving on x only
+        outNeighbors[numNeighbors++] = movedBy(pos, dx, 0);
+    } else if (dx == 0 && dy != 0) { // moving on y only
+        outNeighbors[numNeighbors++] = movedBy(pos, 0, dy);
     } else { // diagonal
-        if (valid(movedBy(pos, incomingX, 0)) || valid(movedBy(pos, 0, incomingY))) { // cannot move across diagonals
-            outNeighbors[num_neighbors++] = movedBy(pos, incomingX, 0);
-            outNeighbors[num_neighbors++] = movedBy(pos, 0, incomingY);
-            outNeighbors[num_neighbors++] = movedBy(pos, incomingX, incomingY);
+        if (valid(movedBy(pos, dx, 0)) || valid(movedBy(pos, 0, dy))) { // cannot move across diagonal walls
+            outNeighbors[numNeighbors++] = movedBy(pos, dx, 0);
+            outNeighbors[numNeighbors++] = movedBy(pos, 0, dy);
+            outNeighbors[numNeighbors++] = movedBy(pos, dx, dy);
         }
     }
-    int num_forced_neighbors = getForcedNeighbors(pos, outNeighbors+num_neighbors, incomingX, incomingY);
-    return num_neighbors + num_forced_neighbors;
+    int numForcedNeighbors = getForcedNeighbors(pos, outNeighbors+numNeighbors, dx, dy);
+    return numNeighbors + numForcedNeighbors;
 }
 
-int JumpPointSearch::getForcedNeighbors(const Position pos, Position outNeighbors[2], int incomingX, int incomingY) {
+int JumpPointSearch::getForcedNeighbors(const Position pos, Position outNeighbors[2], int dx, int dy) {
 
-    int num_forced_neighbors = 0;
-    if (incomingX != 0 && incomingY == 0 && valid(movedBy(pos, incomingX, 0))) {
+    int numForcedNeighbors = 0;
+    if (dx != 0 && dy == 0 && valid(movedBy(pos, dx, 0))) {
         if (!valid(northOf(pos))) {
-            outNeighbors[num_forced_neighbors++] = movedBy(pos, incomingX, -1);
+            outNeighbors[numForcedNeighbors++] = movedBy(pos, dx, -1);
         }
         if (!valid(southOf(pos))) {
-            outNeighbors[num_forced_neighbors++] = movedBy(pos, incomingX, 1);
+            outNeighbors[numForcedNeighbors++] = movedBy(pos, dx, 1);
         }
-    } else if (incomingX == 0 && incomingY != 0 && valid(movedBy(pos, 0, incomingY))) { 
+    } else if (dx == 0 && dy != 0 && valid(movedBy(pos, 0, dy))) { 
         if (!valid(westOf(pos))) {
-            outNeighbors[num_forced_neighbors++] = movedBy(pos, -1, incomingY);
+            outNeighbors[numForcedNeighbors++] = movedBy(pos, -1, dy);
         }
         if (!valid(eastOf(pos))) {
-            outNeighbors[num_forced_neighbors++] = movedBy(pos, 1, incomingY);
+            outNeighbors[numForcedNeighbors++] = movedBy(pos, 1, dy);
         }
     } else { // diagonal
-        if (!valid(movedBy(pos, -incomingX, 0)) && valid(movedBy(pos, 0, incomingY))) {
-            outNeighbors[num_forced_neighbors++] = movedBy(pos, -incomingX, incomingY);
+        if (!valid(movedBy(pos, -dx, 0)) && valid(movedBy(pos, 0, dy))) {
+            outNeighbors[numForcedNeighbors++] = movedBy(pos, -dx, dy);
         }
-        if (!valid(movedBy(pos, 0, -incomingY)) && valid(movedBy(pos, incomingX, 0))) {
-            outNeighbors[num_forced_neighbors++] = movedBy(pos, incomingX, -incomingY);
+        if (!valid(movedBy(pos, 0, -dy)) && valid(movedBy(pos, dx, 0))) {
+            outNeighbors[numForcedNeighbors++] = movedBy(pos, dx, -dy);
         }
     }
-    return num_forced_neighbors;
+    return numForcedNeighbors;
 }
 
-
-
 Position JumpPointSearch::jump(const Position from, const int dx, const int dy) {
-    Position forcedNeighborsBuffer[2];
 
     Position p = movedBy(from, dx, dy);
 
-    //printf("Jumping from (%d, %d) in direction (%d, %d)\n", from.x, from.y, dx, dy);
     while (valid(p)) {
         if (!valid(movedBy(p, -dx, 0)) && !valid(movedBy(p, 0, -dy))) {
             // we moved across a diagonal wall
             return invalidPosition();
         }
-
-        forcedNeighborsBuffer[0] = invalidPosition();
-        forcedNeighborsBuffer[1] = invalidPosition();
-        if (getForcedNeighbors(p, forcedNeighborsBuffer, dx, dy)) {
-            if (valid(forcedNeighborsBuffer[0]) || valid(forcedNeighborsBuffer[1])) {
+        
+        Position forcedNeighborsBuffer[2];
+        int numForcedNeighbors = getForcedNeighbors(p, forcedNeighborsBuffer, dx, dy);
+        for (int i = 0; i < numForcedNeighbors; i += 1) {
+            if (valid(forcedNeighborsBuffer[i])) {
                 return p;
             }
         }
@@ -389,7 +350,16 @@ Position JumpPointSearch::jump(const Position from, const int dx, const int dy) 
 
 }
 
-
+/**
+ * Finds the path from (nStartX, nStartY) to (nTargetX, nTargetY)
+ * through the grid pMap with dimensions (nMapWidth, nMapHeight)
+ * where traversable locations are marked with 1 and non-traversable as 0.
+ *
+ * pOutBuffer is filled with indexes into pMap.
+ * 
+ * If the optimal path is longer than nOutBufferSize, or no path can
+ * be found, -1 is returned.
+ */
 int FindPath( const int nStartX, const int nStartY,
         const int nTargetX, const int nTargetY,
         const unsigned char* pMap, const int nMapWidth, const int nMapHeight,
@@ -404,23 +374,16 @@ int FindPath( const int nStartX, const int nStartY,
 }
 
 
-unsigned int* debugArray;
-
-
-void makeBMP(int, int);
-
-
 int main() {
-
     //const int nMapWidth = 13, nMapHeight = 13;
-
+    //
     //unsigned char pMap[] = {
     //    1,1,1,1,1, 1,1,1,1,1, 1,1,1,
     //    1,1,1,1,1, 1,1,0,0,0, 0,0,1,
     //    1,1,1,1,1, 1,1,1,1,1, 1,1,1,
     //    1,1,1,1,1, 0,1,0,1,1, 1,1,1,
     //    1,1,1,1,1, 0,1,0,0,0, 0,1,1,
-
+    //
     //    1,1,1,1,1, 0,1,0,1,1, 0,1,1,
     //    1,1,1,1,1, 0,1,0,1,1, 1,1,1,
     //    1,1,1,1,1, 0,1,0,1,1, 0,1,1,
@@ -434,11 +397,13 @@ int main() {
     
 
     const int nMapWidth = 1024, nMapHeight = 1024;
-
-
+    
+    
     unsigned char* pMap = new unsigned char[nMapWidth * nMapHeight];
-
+    
     for (int i = 0; i < nMapWidth * nMapHeight; i++) {
+   //     pMap[i] = 1;
+   // }
         pMap[i] = i % 6 != 0;
         if (i % 7 == 0) {
             pMap[i] = 0;
@@ -451,108 +416,29 @@ int main() {
             }
         }
     }
-
+    
     pMap[0] = 1;
-
-    debugArray = new unsigned int[nMapWidth * nMapHeight];
-
-    for (int i = 0; i < nMapWidth*nMapHeight; i += 1) {
-        if (pMap[i] == 0) {
-            debugArray[i] = -1;
-        } else {
-            debugArray[i] = -2;
-        }
-    }
-    debugArray[0] = -3;
 
     int* outputBuffer = new int[1024*1024];
 
-    int pathLength = FindPath(0, 0, nMapWidth-1, nMapHeight-1, pMap, nMapWidth, nMapHeight, outputBuffer, 1024*1024);
+    auto before = std::chrono::steady_clock::now();
+    
+    int pathLength = FindPath(0, 0, nMapWidth-1, nMapHeight-1, pMap, nMapWidth, nMapHeight, outputBuffer, 2483);
+
+    auto after = std::chrono::steady_clock::now();
+
+    printf("Took %d milliseconds\n", std::chrono::duration_cast<std::chrono::milliseconds>(after - before).count());
 
     printf("i = %d\n", pathLength);
+
     for (int i = 0; i < pathLength; i += 1) {
         //printf("%d\n", outputBuffer[i]);
-        debugArray[outputBuffer[i]] = -3;
         if (pMap[outputBuffer[i]] == 0) {
             printf("%d\n", i);
-            throw 4;
         }
     }
-    debugArray[0] = -3;
-
-    makeBMP(nMapWidth, nMapHeight);
 }
 
 
 
 
-
-
-
-
-void makeBMP(int mapWidth, int mapHeight)
-{
-    FILE *f;
-    unsigned char *img = NULL;
-    int filesize = 54 + 3 * mapWidth*mapHeight;  //w is your image width, h is image height, both int
-    if (img)
-        free(img);
-    img = (unsigned char *)malloc(3 * mapWidth*mapHeight);
-    memset(img, 0, sizeof(img));
-
-    for (int x = 0; x < mapWidth; x++)
-    {
-        for (int y = 0; y < mapHeight; y++)
-        {
-            if (debugArray[x + y*mapWidth] == -1) {
-                img[(x + y*mapWidth) * 3 + 2] = (unsigned char)(0);
-                img[(x + y*mapWidth) * 3 + 1] = (unsigned char)(0);
-                img[(x + y*mapWidth) * 3 + 0] = (unsigned char)(0);
-            }
-            else if (debugArray[x + y*mapWidth] == -2) {
-                img[(x + y*mapWidth) * 3 + 2] = (unsigned char)(255);
-                img[(x + y*mapWidth) * 3 + 1] = (unsigned char)(255);
-                img[(x + y*mapWidth) * 3 + 0] = (unsigned char)(255);
-            }
-            else if (debugArray[x + y*mapWidth] == -3) {
-                img[(x + y*mapWidth) * 3 + 2] = (unsigned char)(0);
-                img[(x + y*mapWidth) * 3 + 1] = (unsigned char)(0);
-                img[(x + y*mapWidth) * 3 + 0] = (unsigned char)(255);
-            }
-            else {
-                img[(x + y*mapWidth) * 3 + 2] = (unsigned char)((float)debugArray[x + y*mapWidth] / 105334.f * 255.f);
-                img[(x + y*mapWidth) * 3 + 1] = (unsigned char)(0);
-                img[(x + y*mapWidth) * 3 + 0] = (unsigned char)(0);
-            }
-
-        }
-    }
-
-    unsigned char bmpfileheader[14] = { 'B', 'M', 0, 0, 0, 0, 0, 0, 0, 0, 54, 0, 0, 0 };
-    unsigned char bmpinfoheader[40] = { 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 24, 0 };
-    unsigned char bmppad[3] = { 0, 0, 0 };
-
-    bmpfileheader[2] = (unsigned char)(filesize);
-    bmpfileheader[3] = (unsigned char)(filesize >> 8);
-    bmpfileheader[4] = (unsigned char)(filesize >> 16);
-    bmpfileheader[5] = (unsigned char)(filesize >> 24);
-
-    bmpinfoheader[4] = (unsigned char)(mapWidth);
-    bmpinfoheader[5] = (unsigned char)(mapWidth >> 8);
-    bmpinfoheader[6] = (unsigned char)(mapWidth >> 16);
-    bmpinfoheader[7] = (unsigned char)(mapWidth >> 24);
-    bmpinfoheader[8] = (unsigned char)(mapHeight);
-    bmpinfoheader[9] = (unsigned char)(mapHeight >> 8);
-    bmpinfoheader[10] = (unsigned char)(mapHeight >> 16);
-    bmpinfoheader[11] = (unsigned char)(mapHeight >> 24);
-
-    f = fopen("img.bmp", "wb");
-    fwrite(bmpfileheader, 1, 14, f);
-    fwrite(bmpinfoheader, 1, 40, f);
-    for (int i = 0; i<mapHeight; i++)
-    {
-        fwrite(img + (mapWidth*(mapHeight - i - 1) * 3), 3, mapWidth, f);
-        fwrite(bmppad, 1, (4 - (mapWidth * 3) % 4) % 4, f);
-    }
-    fclose(f);
-}
